@@ -3,9 +3,16 @@
 
 use core::{alloc::Layout, mem::ManuallyDrop, ptr::NonNull};
 
+#[cfg(feature = "nightly")]
+use core::alloc::{AllocError, Allocator};
+
+#[cfg(not(feature = "nightly"))]
 use allocator_api2::alloc::{AllocError, Allocator};
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "nightly", feature = "alloc"))]
+use alloc::alloc::Global;
+
+#[cfg(all(not(feature = "nightly"), feature = "alloc"))]
 use allocator_api2::alloc::Global;
 
 use crate::{api::BlinkAllocator, arena::ArenaLocal};
@@ -73,6 +80,9 @@ switch_alloc_default! {
     /// # #[cfg(feature = "alloc")]
     /// # fn main() {
     /// # use blink_alloc::BlinkAlloc;
+    /// # #[cfg(feature = "nightly")]
+    /// # use std::vec::Vec;
+    /// # #[cfg(not(feature = "nightly"))]
     /// # use allocator_api2::vec::Vec;
     /// let mut blink = BlinkAlloc::new();
     /// let mut vec = Vec::new_in(&blink);
@@ -297,46 +307,6 @@ where
     #[inline(always)]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         BlinkAlloc::allocate(self, layout)
-    }
-
-    #[inline(always)]
-    unsafe fn shrink(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        BlinkAlloc::resize(self, ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    unsafe fn grow(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        BlinkAlloc::resize(self, ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        BlinkAlloc::deallocate(self, ptr, layout.size());
-    }
-}
-
-unsafe impl<A> Allocator for &mut BlinkAlloc<A>
-where
-    A: Allocator,
-{
-    #[inline(always)]
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        BlinkAlloc::allocate(self, layout)
-    }
-
-    #[inline(always)]
-    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        BlinkAlloc::allocate_zeroed(self, layout)
     }
 
     #[inline(always)]

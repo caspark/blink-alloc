@@ -1,3 +1,8 @@
+
+#[cfg(feature = "nightly")]
+use core::alloc::Allocator;
+
+#[cfg(not(feature = "nightly"))]
 use allocator_api2::alloc::Allocator;
 
 /// Extension trait for [`Allocator`] that defines blink allocator API.

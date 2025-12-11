@@ -8,7 +8,10 @@ use core::{
     ptr::{self, NonNull},
 };
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "nightly",feature = "alloc"))]
+use alloc::alloc::Global;
+
+#[cfg(all(not(feature = "nightly"),feature = "alloc"))]
 use allocator_api2::alloc::Global;
 
 use crate::{
@@ -781,7 +784,7 @@ where
         iter: I,
         no_drop: bool,
         err: impl FnOnce(&'a mut [T], Option<T>, Option<Layout>) -> E,
-    ) -> Result<&mut [T], E>
+    ) -> Result<&'a mut [T], E>
     where
         I: IntoIterator<Item = T>,
     {
@@ -1211,7 +1214,7 @@ where
     /// # #[cfg(not(feature = "alloc"))] fn main() {}
     /// ```
     #[inline(always)]
-    pub fn emplace<T: 'static>(&self) -> Emplace<A, T> {
+    pub fn emplace<T: 'static>(&self) -> Emplace<'_, A, T> {
         Emplace {
             blink: self,
             no_drop: false,
@@ -1260,7 +1263,7 @@ where
     /// # #[cfg(not(feature = "alloc"))] fn main() {}
     /// ```
     #[inline(always)]
-    pub fn emplace_no_drop<T>(&self) -> Emplace<A, T> {
+    pub fn emplace_no_drop<T>(&self) -> Emplace<'_, A, T> {
         Emplace {
             blink: self,
             no_drop: true,
@@ -1312,7 +1315,7 @@ where
     /// # #[cfg(not(feature = "alloc"))] fn main() {}
     /// ```
     #[inline(always)]
-    pub fn emplace_shared<T>(&self) -> Emplace<A, T, &T, &[T]> {
+    pub fn emplace_shared<T>(&self) -> Emplace<'_, A, T, &T, &[T]> {
         Emplace {
             blink: self,
             no_drop: true,
@@ -1370,7 +1373,7 @@ where
     /// # #[cfg(not(feature = "alloc"))] fn main() {}
     /// ```
     #[inline(always)]
-    pub unsafe fn emplace_unchecked<T>(&self) -> Emplace<A, T> {
+    pub unsafe fn emplace_unchecked<T>(&self) -> Emplace<'_, A, T> {
         Emplace {
             blink: self,
             no_drop: false,

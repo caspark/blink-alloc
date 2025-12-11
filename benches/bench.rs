@@ -6,10 +6,18 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+#[cfg(feature = "nightly")]
+use std::{
+    alloc::{Allocator, Layout},
+    vec::Vec,
+};
+
+#[cfg(not(feature = "nightly"))]
 use allocator_api2::{
     alloc::{Allocator, Layout},
     vec::Vec,
 };
+
 use blink_alloc::*;
 use criterion::*;
 

@@ -7,9 +7,15 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+#[cfg(feature = "nightly")]
+use core::alloc::{AllocError, Allocator};
+#[cfg(not(feature = "nightly"))]
 use allocator_api2::alloc::{AllocError, Allocator};
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "nightly", feature = "alloc"))]
+use alloc::alloc::Global;
+
+#[cfg(all(not(feature = "nightly"), feature = "alloc"))]
 use allocator_api2::alloc::Global;
 
 use crate::{
@@ -86,6 +92,9 @@ switch_alloc_default! {
     /// ```
     /// # #![cfg_attr(feature = "nightly", feature(allocator_api))]
     /// # use blink_alloc::SyncBlinkAlloc;
+    /// # #[cfg(feature = "nightly")]
+    /// # use std::vec::Vec;
+    /// # #[cfg(not(feature = "nightly"))]
     /// # use allocator_api2::vec::Vec;
     /// # fn main() {
     /// let mut blink = SyncBlinkAlloc::new();
@@ -198,6 +207,9 @@ where
     /// ```
     /// # #![cfg_attr(feature = "nightly", feature(allocator_api))]
     /// # use blink_alloc::SyncBlinkAlloc;
+    /// # #[cfg(feature = "nightly")]
+    /// # use std::vec::Vec;
+    /// # #[cfg(not(feature = "nightly"))]
     /// # use allocator_api2::vec::Vec;
     /// # #[cfg(feature = "alloc")] fn main() {
     /// let mut blink = SyncBlinkAlloc::new();
@@ -218,7 +230,7 @@ where
     /// # #[cfg(not(feature = "alloc"))] fn main() {}
     /// ```
     #[inline(always)]
-    pub fn local(&self) -> LocalBlinkAlloc<A> {
+    pub fn local(&self) -> LocalBlinkAlloc<'_, A> {
         LocalBlinkAlloc {
             arena: ArenaLocal::with_chunk_size(self.max_local_alloc.load(Ordering::Relaxed)),
             shared: self,
@@ -391,46 +403,6 @@ where
     }
 }
 
-unsafe impl<A> Allocator for &mut SyncBlinkAlloc<A>
-where
-    A: Allocator,
-{
-    #[inline(always)]
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        SyncBlinkAlloc::allocate(self, layout)
-    }
-
-    #[inline(always)]
-    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        SyncBlinkAlloc::allocate_zeroed(self, layout)
-    }
-
-    #[inline(always)]
-    unsafe fn shrink(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        SyncBlinkAlloc::resize(self, ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    unsafe fn grow(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        SyncBlinkAlloc::resize(self, ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        SyncBlinkAlloc::deallocate(self, ptr, layout.size());
-    }
-}
-
 unsafe impl<A> BlinkAllocator for SyncBlinkAlloc<A>
 where
     A: Allocator,
@@ -574,46 +546,6 @@ where
     #[inline(always)]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         LocalBlinkAlloc::allocate(self, layout)
-    }
-
-    #[inline(always)]
-    unsafe fn shrink(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        LocalBlinkAlloc::resize(self, ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    unsafe fn grow(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        LocalBlinkAlloc::resize(self, ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        LocalBlinkAlloc::deallocate(self, ptr, layout.size())
-    }
-}
-
-unsafe impl<A> Allocator for &mut LocalBlinkAlloc<'_, A>
-where
-    A: Allocator,
-{
-    #[inline(always)]
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        LocalBlinkAlloc::allocate(self, layout)
-    }
-
-    #[inline(always)]
-    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        LocalBlinkAlloc::allocate_zeroed(self, layout)
     }
 
     #[inline(always)]

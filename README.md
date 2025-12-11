@@ -164,6 +164,9 @@ use blink_alloc::BlinkAlloc;
 
 #[cfg(feature = "alloc")]
 fn main() {
+    #[cfg(feature = "nightly")]
+    use std::vec::Vec;
+    #[cfg(not(feature = "nightly"))]
     use allocator_api2::vec::Vec;
 
     let mut blink = BlinkAlloc::new();

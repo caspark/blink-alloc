@@ -2,6 +2,12 @@
 
 use core::{alloc::Layout, cell::Cell, mem::size_of, ptr::NonNull};
 
+#[cfg(feature = "nightly")]
+use alloc::{
+    alloc::{AllocError, Allocator, Global},
+    vec::Vec,
+};
+#[cfg(not(feature = "nightly"))]
 use allocator_api2::{
     alloc::{AllocError, Allocator, Global},
     vec::Vec,
@@ -33,7 +39,7 @@ fn test_bad_iter() {
     unsafe impl Allocator for OneTimeGlobal {
         fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
             if self.served.get() {
-                Err(allocator_api2::alloc::AllocError)
+                Err(AllocError)
             } else {
                 self.served.set(true);
                 Global.allocate(layout)

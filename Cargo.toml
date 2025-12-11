@@ -13,7 +13,7 @@ keywords = ["allocator", "arena", "concurrent", "drop", "no-std"]
 categories = ["memory-management", "no-std"]
 
 [features]
-nightly = ["allocator-api2/nightly", "bumpalo/allocator_api"]
+nightly = ["bumpalo/allocator_api"]
 alloc = ["allocator-api2/alloc"]
 std = ["alloc", "allocator-api2/std"]
 sync = ["parking_lot", "std"]
@@ -22,11 +22,11 @@ default = ["std"]
 
 [dependencies]
 parking_lot = { version = "0.12", optional = true }
-allocator-api2 = { version = "0.2.8", default-features = false }
+allocator-api2 = { version = "0.4.0", default-features = false }
 
 [dev-dependencies]
 criterion = "0.4"
-bumpalo = "3.7"
+bumpalo = "3.19"
 
 [[bench]]
 name = "bench"

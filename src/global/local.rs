@@ -7,6 +7,10 @@ use core::{
 #[cfg(debug_assertions)]
 use core::cell::Cell;
 
+#[cfg(feature = "nightly")]
+use core::alloc::{AllocError, Allocator};
+
+#[cfg(not(feature = "nightly"))]
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use crate::{cold, local::BlinkAlloc};
