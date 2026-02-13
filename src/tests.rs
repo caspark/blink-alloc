@@ -148,7 +148,6 @@ fn test_vec() {
     blink_alloc.reset();
 }
 
-
 #[test]
 fn test_tracking() {
     let item_size = 3;
@@ -169,22 +168,34 @@ fn test_tracking() {
     for _ in 0..item_count {
         blink.allocate(layout).unwrap();
     }
-    assert_eq!(blink.allocated_bytes(), data_bytes + initial_chunk_waste,
-        "pre-warmup: over-counts by unused tail of exhausted first chunk");
+    assert_eq!(
+        blink.allocated_bytes(),
+        data_bytes + initial_chunk_waste,
+        "pre-warmup: over-counts by unused tail of exhausted first chunk"
+    );
 
     blink.reset();
     assert_eq!(blink.allocated_bytes(), 0);
     let warmed_cap = blink.total_capacity();
     assert_eq!(warmed_cap, 96);
-    assert!(warmed_cap >= data_bytes, "retained chunk should fit all data");
+    assert!(
+        warmed_cap >= data_bytes,
+        "retained chunk should fit all data"
+    );
 
     for _ in 0..item_count {
         blink.allocate(layout).unwrap();
     }
-    assert_eq!(blink.allocated_bytes(), data_bytes,
-        "post-warmup: exact tracking in single chunk");
-    assert_eq!(blink.total_capacity(), warmed_cap,
-        "post-warmup: capacity unchanged");
+    assert_eq!(
+        blink.allocated_bytes(),
+        data_bytes,
+        "post-warmup: exact tracking in single chunk"
+    );
+    assert_eq!(
+        blink.total_capacity(),
+        warmed_cap,
+        "post-warmup: capacity unchanged"
+    );
 }
 
 #[cfg(feature = "sync")]
@@ -209,8 +220,11 @@ fn test_tracking_sync() {
     for _ in 0..item_count {
         blink.allocate(layout).unwrap();
     }
-    assert_eq!(blink.allocated_bytes(), data_bytes + initial_chunk_waste,
-        "pre-warmup: over-counts by unused tail of exhausted first chunk");
+    assert_eq!(
+        blink.allocated_bytes(),
+        data_bytes + initial_chunk_waste,
+        "pre-warmup: over-counts by unused tail of exhausted first chunk"
+    );
 
     blink.reset();
     assert_eq!(blink.allocated_bytes(), 0);
@@ -220,10 +234,16 @@ fn test_tracking_sync() {
     for _ in 0..item_count {
         blink.allocate(layout).unwrap();
     }
-    assert_eq!(blink.allocated_bytes(), data_bytes,
-        "post-warmup: exact tracking in single chunk");
-    assert_eq!(blink.total_capacity(), warmed_cap,
-        "post-warmup: capacity unchanged");
+    assert_eq!(
+        blink.allocated_bytes(),
+        data_bytes,
+        "post-warmup: exact tracking in single chunk"
+    );
+    assert_eq!(
+        blink.total_capacity(),
+        warmed_cap,
+        "post-warmup: capacity unchanged"
+    );
 }
 
 #[cfg(feature = "sync")]
@@ -255,29 +275,45 @@ fn test_tracking_local_proxy() {
     for _ in 0..item_count {
         local.allocate(layout).unwrap();
     }
-    assert_eq!(local.allocated_bytes(), data_bytes + initial_chunk_waste,
-        "local over-counts by chunk tail waste, same as BlinkAlloc");
+    assert_eq!(
+        local.allocated_bytes(),
+        data_bytes + initial_chunk_waste,
+        "local over-counts by chunk tail waste, same as BlinkAlloc"
+    );
 
     let local_chunk_1_cap = 32;
     let local_chunk_2_cap = 96;
-    assert_eq!(local.total_capacity(), local_chunk_1_cap + local_chunk_2_cap,
-        "local has two chunks allocated from shared");
+    assert_eq!(
+        local.total_capacity(),
+        local_chunk_1_cap + local_chunk_2_cap,
+        "local has two chunks allocated from shared"
+    );
 
     let local_chunk_bytes =
         (local_chunk_1_cap + CHUNK_HEADER_SIZE) + (local_chunk_2_cap + CHUNK_HEADER_SIZE);
     assert_eq!(local_chunk_bytes, 192);
-    assert_eq!(shared.allocated_bytes(), local_chunk_bytes,
-        "shared sees local's chunk allocations, not individual items");
+    assert_eq!(
+        shared.allocated_bytes(),
+        local_chunk_bytes,
+        "shared sees local's chunk allocations, not individual items"
+    );
 
-    let shared_cap = (shared_chunk_size + CHUNK_HEADER_SIZE).next_power_of_two() - CHUNK_HEADER_SIZE;
+    let shared_cap =
+        (shared_chunk_size + CHUNK_HEADER_SIZE).next_power_of_two() - CHUNK_HEADER_SIZE;
     assert_eq!(shared_cap, 992);
     assert_eq!(shared.total_capacity(), shared_cap);
 
     drop(local);
-    assert_eq!(shared.allocated_bytes(), local_chunk_bytes,
-        "shared still holds local's chunk memory after drop");
-    assert_eq!(shared.total_capacity(), shared_cap,
-        "shared capacity does not change from dropping local");
+    assert_eq!(
+        shared.allocated_bytes(),
+        local_chunk_bytes,
+        "shared still holds local's chunk memory after drop"
+    );
+    assert_eq!(
+        shared.total_capacity(),
+        shared_cap,
+        "shared capacity does not change from dropping local"
+    );
 
     shared.reset();
     assert_eq!(shared.allocated_bytes(), 0);
