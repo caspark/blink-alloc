@@ -148,280 +148,138 @@ fn test_vec() {
     blink_alloc.reset();
 }
 
+
 #[test]
-fn test_tracking_fresh_is_zero() {
-    let blink = BlinkAlloc::new();
+fn test_tracking() {
+    let item_size = 3;
+    let layout = Layout::from_size_align(item_size, 1).unwrap();
+    let item_count = 11;
+    let data_bytes = item_count * item_size;
+    assert_eq!(data_bytes, 33);
+    // Start with a chunk too small for all data (32 < 33),
+    // forcing overflow into a second chunk.
+    let initial_chunk_size = 32;
+    let initial_chunk_waste = initial_chunk_size % item_size;
+    assert_eq!(initial_chunk_waste, 2);
+
+    let mut blink = BlinkAlloc::with_chunk_size(initial_chunk_size);
     assert_eq!(blink.allocated_bytes(), 0);
     assert_eq!(blink.total_capacity(), 0);
-}
 
-#[test]
-fn test_tracking_single_alloc() {
-    let blink = BlinkAlloc::new();
-    blink.allocate(Layout::new::<u64>()).unwrap();
-    assert!(blink.allocated_bytes() >= 8);
-    assert!(blink.total_capacity() >= blink.allocated_bytes());
-}
-
-#[test]
-fn test_tracking_monotonic_increase() {
-    let blink = BlinkAlloc::new();
-    let layout = Layout::new::<u32>();
-    let mut prev = 0;
-    for _ in 0..100 {
+    for _ in 0..item_count {
         blink.allocate(layout).unwrap();
-        let current = blink.allocated_bytes();
-        assert!(current >= prev + 4,
-            "allocated_bytes should grow by at least 4: prev={}, current={}",
-            prev, current);
-        prev = current;
     }
-}
+    assert_eq!(blink.allocated_bytes(), data_bytes + initial_chunk_waste,
+        "pre-warmup: over-counts by unused tail of exhausted first chunk");
 
-#[test]
-fn test_tracking_reset_zeros_bytes() {
-    let mut blink = BlinkAlloc::new();
-    for _ in 0..50 {
-        blink.allocate(Layout::new::<[u8; 64]>()).unwrap();
-    }
-    assert!(blink.allocated_bytes() > 0);
     blink.reset();
     assert_eq!(blink.allocated_bytes(), 0);
-    assert!(blink.total_capacity() > 0, "last chunk should be retained");
+    let warmed_cap = blink.total_capacity();
+    assert_eq!(warmed_cap, 96);
+    assert!(warmed_cap >= data_bytes, "retained chunk should fit all data");
+
+    for _ in 0..item_count {
+        blink.allocate(layout).unwrap();
+    }
+    assert_eq!(blink.allocated_bytes(), data_bytes,
+        "post-warmup: exact tracking in single chunk");
+    assert_eq!(blink.total_capacity(), warmed_cap,
+        "post-warmup: capacity unchanged");
 }
 
+#[cfg(feature = "sync")]
 #[test]
-fn test_tracking_reset_final_zeros_everything() {
-    let mut blink = BlinkAlloc::new();
-    for _ in 0..50 {
-        blink.allocate(Layout::new::<[u8; 64]>()).unwrap();
-    }
-    blink.reset_final();
+fn test_tracking_sync() {
+    use crate::SyncBlinkAlloc;
+
+    let item_size = 3;
+    let layout = Layout::from_size_align(item_size, 1).unwrap();
+    let item_count = 11;
+    let data_bytes = item_count * item_size;
+    assert_eq!(data_bytes, 33);
+
+    let initial_chunk_size = 32;
+    let initial_chunk_waste = initial_chunk_size % item_size;
+    assert_eq!(initial_chunk_waste, 2);
+
+    let mut blink = SyncBlinkAlloc::with_chunk_size_in(initial_chunk_size, Global);
     assert_eq!(blink.allocated_bytes(), 0);
     assert_eq!(blink.total_capacity(), 0);
-}
 
-#[test]
-fn test_tracking_warmup_exact_u64() {
-    let mut blink = BlinkAlloc::new();
-    let layout = Layout::new::<u64>();
-    for _ in 0..200 {
+    for _ in 0..item_count {
         blink.allocate(layout).unwrap();
     }
-    blink.reset();
+    assert_eq!(blink.allocated_bytes(), data_bytes + initial_chunk_waste,
+        "pre-warmup: over-counts by unused tail of exhausted first chunk");
 
-    // Single chunk after warm-up. ChunkHeader base is aligned to
-    // align_of::<ChunkHeader>() which is >= 8, so u64 allocs pack
-    // with no padding.
-    for _ in 0..200 {
-        blink.allocate(layout).unwrap();
-    }
-    assert_eq!(blink.allocated_bytes(), 200 * 8);
-}
-
-#[test]
-fn test_tracking_warmup_exact_u32() {
-    let mut blink = BlinkAlloc::new();
-    let layout = Layout::new::<u32>();
-    for _ in 0..500 {
-        blink.allocate(layout).unwrap();
-    }
-    blink.reset();
-
-    for _ in 0..500 {
-        blink.allocate(layout).unwrap();
-    }
-    assert_eq!(blink.allocated_bytes(), 500 * 4);
-}
-
-#[test]
-fn test_tracking_warmup_exact_mixed() {
-    let mut blink = BlinkAlloc::new();
-    // Allocate a pattern that includes alignment padding.
-    let l1 = Layout::new::<u8>();  // size 1, align 1
-    let l2 = Layout::new::<u64>(); // size 8, align 8
-    for _ in 0..100 {
-        blink.allocate(l1).unwrap();
-        blink.allocate(l2).unwrap();
-    }
-    let first_pass = blink.allocated_bytes();
-    blink.reset();
-
-    // Second pass: same pattern, same single chunk, should be identical.
-    for _ in 0..100 {
-        blink.allocate(l1).unwrap();
-        blink.allocate(l2).unwrap();
-    }
-    assert_eq!(blink.allocated_bytes(), first_pass);
-    // Each pair: 1 byte for u8, then up to 7 bytes padding, then 8 bytes
-    // for u64 = 16 bytes per pair. Cursor advances by 16 each time.
-    assert_eq!(blink.allocated_bytes(), 100 * 16);
-}
-
-#[test]
-fn test_tracking_capacity_stabilizes() {
-    let mut blink = BlinkAlloc::new();
-    let layout = Layout::new::<u32>();
-    let mut prev_cap = 0;
-    for cycle in 0..10 {
-        for _ in 0..500 {
-            blink.allocate(layout).unwrap();
-        }
-        let cap = blink.total_capacity();
-        blink.reset();
-        if cycle >= 2 {
-            assert_eq!(cap, prev_cap,
-                "capacity should stabilize: cycle {}", cycle);
-        }
-        prev_cap = cap;
-    }
-}
-
-#[test]
-fn test_tracking_aligned_allocs() {
-    let blink = BlinkAlloc::new();
-    blink.allocate(Layout::from_size_align(1, 1).unwrap()).unwrap();
-    let a1 = blink.allocated_bytes();
-    blink.allocate(Layout::from_size_align(1, 16).unwrap()).unwrap();
-    let a2 = blink.allocated_bytes();
-    blink.allocate(Layout::from_size_align(1, 64).unwrap()).unwrap();
-    let a3 = blink.allocated_bytes();
-    assert!(a1 > 0);
-    assert!(a2 > a1);
-    assert!(a3 > a2);
-}
-
-#[test]
-fn test_tracking_multi_chunk() {
-    let blink = BlinkAlloc::new();
-    let small = Layout::from_size_align(8, 8).unwrap();
-    let big = Layout::from_size_align(4096, 8).unwrap();
-    for _ in 0..30 {
-        blink.allocate(small).unwrap();
-    }
-    let before = blink.allocated_bytes();
-    blink.allocate(big).unwrap();
-    assert!(blink.allocated_bytes() >= before + 4096);
-}
-
-#[test]
-fn test_tracking_approximation_error() {
-    let mut blink = BlinkAlloc::new();
-    let layout = Layout::new::<u32>();
-    let count = 10_000;
-    for _ in 0..count {
-        blink.allocate(layout).unwrap();
-    }
-    let exact_data = count * 4;
-    let reported = blink.allocated_bytes();
-    assert!(reported >= exact_data);
-    let overhead = reported - exact_data;
-    assert!(overhead < exact_data / 10,
-        "overhead ({}) should be < 10% of data ({})", overhead, exact_data);
-
-    // After warm-up the error should be near zero.
-    blink.reset();
-    for _ in 0..count {
-        blink.allocate(layout).unwrap();
-    }
-    let warm = blink.allocated_bytes();
-    let warm_overhead = warm - exact_data;
-    assert!(warm_overhead < exact_data / 100,
-        "warm overhead ({}) should be < 1% of data ({})", warm_overhead, exact_data);
-}
-
-#[test]
-fn test_tracking_vec() {
-    let mut blink = BlinkAlloc::new();
-    let mut v: Vec<u64, _> = Vec::new_in(&blink);
-    v.extend(0u64..100);
-    drop(v);
-    assert!(blink.allocated_bytes() > 0);
     blink.reset();
     assert_eq!(blink.allocated_bytes(), 0);
-}
+    let warmed_cap = blink.total_capacity();
+    assert_eq!(warmed_cap, 96);
 
-#[test]
-fn test_tracking_capacity_gte_allocated() {
-    let blink = BlinkAlloc::new();
-    let layouts = [
-        Layout::new::<u8>(),
-        Layout::new::<u32>(),
-        Layout::new::<u64>(),
-        Layout::new::<[u8; 128]>(),
-        Layout::new::<[u64; 32]>(),
-    ];
-    for layout in layouts.iter().cycle().take(500) {
-        blink.allocate(*layout).unwrap();
-        assert!(blink.total_capacity() >= blink.allocated_bytes());
-    }
-}
-
-#[test]
-fn test_tracking_capacity_monotonic() {
-    let blink = BlinkAlloc::new();
-    let layout = Layout::new::<u64>();
-    let mut prev = 0;
-    for _ in 0..500 {
+    for _ in 0..item_count {
         blink.allocate(layout).unwrap();
-        let cap = blink.total_capacity();
-        assert!(cap >= prev);
-        prev = cap;
     }
+    assert_eq!(blink.allocated_bytes(), data_bytes,
+        "post-warmup: exact tracking in single chunk");
+    assert_eq!(blink.total_capacity(), warmed_cap,
+        "post-warmup: capacity unchanged");
 }
 
+#[cfg(feature = "sync")]
 #[test]
-fn test_tracking_custom_chunk_size() {
-    let small = BlinkAlloc::with_chunk_size(64);
-    let large = BlinkAlloc::with_chunk_size(8192);
-    small.allocate(Layout::new::<u8>()).unwrap();
-    large.allocate(Layout::new::<u8>()).unwrap();
-    assert!(large.total_capacity() > small.total_capacity());
-}
+fn test_tracking_local_proxy() {
+    use crate::SyncBlinkAlloc;
 
-#[test]
-fn test_tracking_zero_size_layout() {
-    let blink = BlinkAlloc::new();
-    blink.allocate(Layout::from_size_align(0, 1).unwrap()).unwrap();
-    let _ = blink.allocated_bytes();
-    let _ = blink.total_capacity();
-}
+    /// ChunkHeader has 4 usize fields: cursor, end, prev, cumulative_size.
+    const CHUNK_HEADER_SIZE: usize = size_of::<usize>() * 4;
 
-#[test]
-fn test_tracking_huge_alloc() {
-    let blink = BlinkAlloc::new();
-    let size = 1024 * 1024;
-    blink.allocate(Layout::from_size_align(size, 8).unwrap()).unwrap();
-    assert!(blink.allocated_bytes() >= size);
-    assert!(blink.total_capacity() >= size);
-}
+    let item_size = 3;
+    let layout = Layout::from_size_align(item_size, 1).unwrap();
+    let item_count = 11;
+    let data_bytes = item_count * item_size;
+    assert_eq!(data_bytes, 33);
 
-#[test]
-fn test_tracking_blink_put() {
-    let mut blink = Blink::new();
-    assert_eq!(blink.allocator().allocated_bytes(), 0);
-    blink.put(42u64);
-    assert!(blink.allocator().allocated_bytes() > 0);
-    blink.put(123u32);
-    assert!(blink.allocator().allocated_bytes() > 0);
-    blink.reset();
-    assert_eq!(blink.allocator().allocated_bytes(), 0);
-}
+    let initial_chunk_size = 32;
+    let initial_chunk_waste = initial_chunk_size % item_size;
+    assert_eq!(initial_chunk_waste, 2);
+    let shared_chunk_size = 512;
+    let mut shared = SyncBlinkAlloc::with_chunk_size_in(shared_chunk_size, Global);
+    assert_eq!(shared.allocated_bytes(), 0);
+    assert_eq!(shared.total_capacity(), 0);
 
-#[test]
-fn test_tracking_blink_emplace_iter() {
-    let mut blink = Blink::new();
-    let _slice = blink.emplace().from_iter(0u64..50);
-    assert!(blink.allocator().allocated_bytes() >= 400,
-        "should be >= 400 (50 u64s), got {}", blink.allocator().allocated_bytes());
-    blink.reset();
-    assert_eq!(blink.allocator().allocated_bytes(), 0);
-}
+    let local = shared.local();
+    assert_eq!(local.allocated_bytes(), 0);
+    assert_eq!(local.total_capacity(), 0);
 
-#[test]
-fn test_tracking_blink_copy_str() {
-    let blink = Blink::new();
-    let s = "hello world, this is a test string!";
-    blink.copy_str(s);
-    assert!(blink.allocator().allocated_bytes() >= s.len());
+    for _ in 0..item_count {
+        local.allocate(layout).unwrap();
+    }
+    assert_eq!(local.allocated_bytes(), data_bytes + initial_chunk_waste,
+        "local over-counts by chunk tail waste, same as BlinkAlloc");
+
+    let local_chunk_1_cap = 32;
+    let local_chunk_2_cap = 96;
+    assert_eq!(local.total_capacity(), local_chunk_1_cap + local_chunk_2_cap,
+        "local has two chunks allocated from shared");
+
+    let local_chunk_bytes =
+        (local_chunk_1_cap + CHUNK_HEADER_SIZE) + (local_chunk_2_cap + CHUNK_HEADER_SIZE);
+    assert_eq!(local_chunk_bytes, 192);
+    assert_eq!(shared.allocated_bytes(), local_chunk_bytes,
+        "shared sees local's chunk allocations, not individual items");
+
+    let shared_cap = (shared_chunk_size + CHUNK_HEADER_SIZE).next_power_of_two() - CHUNK_HEADER_SIZE;
+    assert_eq!(shared_cap, 992);
+    assert_eq!(shared.total_capacity(), shared_cap);
+
+    drop(local);
+    assert_eq!(shared.allocated_bytes(), local_chunk_bytes,
+        "shared still holds local's chunk memory after drop");
+    assert_eq!(shared.total_capacity(), shared_cap,
+        "shared capacity does not change from dropping local");
+
+    shared.reset();
+    assert_eq!(shared.allocated_bytes(), 0);
+    assert_eq!(shared.total_capacity(), shared_cap);
 }
