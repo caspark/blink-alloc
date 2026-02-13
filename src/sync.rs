@@ -366,6 +366,33 @@ where
         self.max_local_alloc
             .fetch_max(max_local_alloc, Ordering::Relaxed);
     }
+
+    /// Returns the approximate number of bytes allocated from this allocator.
+    ///
+    /// This is the sum of the capacity of all previous (fully used) chunks
+    /// plus the bytes used in the current chunk. After warm-up (when
+    /// [`reset`](SyncBlinkAlloc::reset) has been called enough times that a
+    /// single chunk serves all allocations), this value is exact.
+    ///
+    /// Note: this does not include bytes allocated by
+    /// [`LocalBlinkAlloc`] proxies. Use
+    /// [`LocalBlinkAlloc::allocated_bytes`] for those.
+    pub fn allocated_bytes(&self) -> usize {
+        self.arena.allocated_bytes()
+    }
+
+    /// Returns the total capacity of all chunks in this allocator.
+    ///
+    /// This is the total amount of memory obtained from the underlying
+    /// allocator (excluding chunk headers). After
+    /// [`reset`](SyncBlinkAlloc::reset), only the last chunk is retained, so
+    /// this equals the capacity of that single chunk.
+    ///
+    /// Note: this does not include capacity of
+    /// [`LocalBlinkAlloc`] proxies.
+    pub fn total_capacity(&self) -> usize {
+        self.arena.total_capacity()
+    }
 }
 
 unsafe impl<A> Allocator for SyncBlinkAlloc<A>
@@ -537,6 +564,21 @@ where
             self.arena.reset_unchecked(true, self.shared);
         }
     }
+
+    /// Returns the approximate number of bytes allocated from this
+    /// thread-local proxy allocator.
+    ///
+    /// See [`BlinkAlloc::allocated_bytes`](crate::BlinkAlloc::allocated_bytes)
+    /// for details on the approximation.
+    pub fn allocated_bytes(&self) -> usize {
+        self.arena.allocated_bytes()
+    }
+
+    /// Returns the total capacity of all chunks in this thread-local
+    /// proxy allocator.
+    pub fn total_capacity(&self) -> usize {
+        self.arena.total_capacity()
+    }
 }
 
 unsafe impl<A> Allocator for LocalBlinkAlloc<'_, A>
@@ -581,5 +623,81 @@ where
     #[inline(always)]
     fn reset(&mut self) {
         LocalBlinkAlloc::reset(self)
+    }
+}
+
+#[cfg(all(test, feature = "alloc"))]
+mod tracking_tests {
+    use super::*;
+
+    #[test]
+    fn sync_fresh_is_zero() {
+        let blink = SyncBlinkAlloc::new();
+        assert_eq!(blink.allocated_bytes(), 0);
+        assert_eq!(blink.total_capacity(), 0);
+    }
+
+    #[test]
+    fn sync_alloc_and_reset() {
+        let mut blink = SyncBlinkAlloc::new();
+        let layout = Layout::new::<u64>();
+        blink.allocate(layout).unwrap();
+        assert!(blink.allocated_bytes() >= 8);
+        assert!(blink.total_capacity() >= blink.allocated_bytes());
+        blink.reset();
+        assert_eq!(blink.allocated_bytes(), 0);
+        assert!(blink.total_capacity() > 0);
+    }
+
+    #[test]
+    fn sync_multi_threaded() {
+        let mut blink = SyncBlinkAlloc::new();
+        let layout = Layout::new::<u64>();
+        std::thread::scope(|s| {
+            for _ in 0..4 {
+                s.spawn(|| {
+                    for _ in 0..100 {
+                        blink.allocate(layout).unwrap();
+                    }
+                });
+            }
+        });
+        // 4 threads × 100 × 8 = 3200
+        assert!(blink.allocated_bytes() >= 3200,
+            "got {}", blink.allocated_bytes());
+        assert!(blink.total_capacity() >= blink.allocated_bytes());
+        blink.reset();
+        assert_eq!(blink.allocated_bytes(), 0);
+    }
+
+    #[test]
+    fn local_proxy_tracking() {
+        let mut blink = SyncBlinkAlloc::new();
+        let layout = Layout::new::<u64>();
+        {
+            let local = blink.local();
+            assert_eq!(local.allocated_bytes(), 0);
+            for _ in 0..50 {
+                local.allocate(layout).unwrap();
+            }
+            assert!(local.allocated_bytes() >= 400,
+                "got {}", local.allocated_bytes());
+            assert!(local.total_capacity() >= local.allocated_bytes());
+        }
+        blink.reset();
+    }
+
+    #[test]
+    fn local_proxy_reset() {
+        let blink = SyncBlinkAlloc::new();
+        let layout = Layout::new::<u64>();
+        let mut local = blink.local();
+        for _ in 0..50 {
+            local.allocate(layout).unwrap();
+        }
+        assert!(local.allocated_bytes() >= 400);
+        local.reset();
+        assert_eq!(local.allocated_bytes(), 0);
+        assert!(local.total_capacity() > 0);
     }
 }
