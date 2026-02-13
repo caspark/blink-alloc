@@ -374,9 +374,10 @@ where
     /// [`reset`](SyncBlinkAlloc::reset) has been called enough times that a
     /// single chunk serves all allocations), this value is exact.
     ///
-    /// Note: this does not include bytes allocated by
-    /// [`LocalBlinkAlloc`] proxies. Use
-    /// [`LocalBlinkAlloc::allocated_bytes`] for those.
+    /// Note: [`LocalBlinkAlloc`] proxies allocate their own chunks from
+    /// this allocator, so their chunk allocations (not individual items)
+    /// will be reflected here. Use [`LocalBlinkAlloc::allocated_bytes`]
+    /// to track items allocated through a proxy.
     pub fn allocated_bytes(&self) -> usize {
         self.arena.allocated_bytes()
     }
@@ -388,8 +389,10 @@ where
     /// [`reset`](SyncBlinkAlloc::reset), only the last chunk is retained, so
     /// this equals the capacity of that single chunk.
     ///
-    /// Note: this does not include capacity of
-    /// [`LocalBlinkAlloc`] proxies.
+    /// Note: [`LocalBlinkAlloc`] proxies allocate their own chunks from
+    /// this allocator, which contributes to the capacity reported here.
+    /// Use [`LocalBlinkAlloc::total_capacity`] to inspect a proxy's
+    /// own capacity.
     pub fn total_capacity(&self) -> usize {
         self.arena.total_capacity()
     }
@@ -568,14 +571,16 @@ where
     /// Returns the approximate number of bytes allocated from this
     /// thread-local proxy allocator.
     ///
-    /// See [`BlinkAlloc::allocated_bytes`](crate::BlinkAlloc::allocated_bytes)
-    /// for details on the approximation.
+    /// See [`SyncBlinkAlloc::allocated_bytes`] for details on the
+    /// approximation. Note that this only tracks allocations made
+    /// through this proxy; the parent [`SyncBlinkAlloc`] tracks the
+    /// proxy's chunk allocations separately.
     pub fn allocated_bytes(&self) -> usize {
         self.arena.allocated_bytes()
     }
 
-    /// Returns the total capacity of all chunks in this thread-local
-    /// proxy allocator.
+    /// Returns the total capacity of all chunks owned by this
+    /// thread-local proxy allocator.
     pub fn total_capacity(&self) -> usize {
         self.arena.total_capacity()
     }
